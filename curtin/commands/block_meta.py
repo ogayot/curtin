@@ -527,6 +527,8 @@ def v2_get_path_to_disk(vol):
         else:
             cands.append(set())
 
+    LOG.debug('found candidate disks %s', cands)
+
     cands = set.intersection(*cands)
 
     if len(cands) == 0:
@@ -537,7 +539,7 @@ def v2_get_path_to_disk(vol):
             "Storage volume id='%s' config: %s identified multiple devices"
             % (vol['id'], vol))
 
-    return next(iter(cands))
+    return cands.pop()
 
 
 def get_path_to_storage_volume(volume, storage_config):
