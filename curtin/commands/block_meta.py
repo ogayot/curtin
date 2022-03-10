@@ -475,36 +475,48 @@ def v1_get_path_to_disk(vol):
 
 
 def v2_get_path_to_disk(vol):
-    all_disks = [
-        dev for dev in udev_all_block_device_properties()
-        if 'DM_PART' not in dev and 'PARTN' not in dev
-    ]
+    all_disks = []
+    link2dev = {}
+
+    for dev in udev_all_block_device_properties():
+        if 'DM_PART' in dev or 'PARTN' in dev:
+            continue
+        for link in dev.get('DEVLINKS', '').split():
+            link2dev[link] = dev
+        link2dev[dev['DEVNAME']] = dev
+        all_disks.append(dev)
 
     def disks_matching(key, value):
-        return [
-            dev['DEVNAME']
-            for dev in all_disks
-            if key in dev and dev[key] == value
-            ]
+        return [dev for dev in all_disks if key in dev and dev[key] == value]
 
     def disk_by_path(path):
-        for dev in all_disks:
-            if dev['DEVNAME'] == path or path in dev['DEVLINKS'].split():
-                return dev['DEVNAME']
+        return link2dev[path]
+
+    def disk_by_keys(val, *keys):
+        for key in keys:
+            devs = disks_matching(key, val)
+            if devs:
+                return devs
+        return []
 
     cands = []
+
+    def add_cands(*devs):
+        new_devs = []
+        for dev in devs:
+            if multipath.is_mpath_member(dev['DEVNAME'], dev):
+                mpath_id = multipath.get_mpath_id_from_device(
+                    dev['DEVNAME'], dev)
+                dev = link2dev['/dev/mapper/' + mpath_id]
+            new_devs.append(dev)
+        cands.append(set([dev['DEVNAME'] for dev in new_devs]))
+
     if 'wwn' in vol:
-        for key in 'DM_WWN', 'ID_WWN':
-            devs = disks_matching(key, vol['wwn'])
-            if devs:
-                break
-        cands.append(set(devs))
+        add_cands(*disk_by_keys(vol['wwn'], 'DM_WWN', 'ID_WWN'))
     if 'serial' in vol:
-        for key in 'DM_SERIAL', 'ID_SERIAL':
-            devs = disks_matching(key, vol['serial'])
-            if devs:
-                break
-        cands.append(set(devs))
+        add_cands(
+            *disk_by_keys(
+                vol['serial'], 'DM_SERIAL', 'ID_SERIAL', 'ID_SERIAL_SHORT'))
     if 'device_id' in vol:
         dasd_device = dasd.DasdDevice(vol['device_id'])
         cands.append(set([dasd_device.devname]))
@@ -517,13 +529,9 @@ def v2_get_path_to_disk(vol):
         if path.startswith('iscsi:'):
             i = iscsi.ensure_disk_connected(path)
             path = i.devdisk_path
-        if multipath.is_mpath_member(path):
-            # if path points to a multipath member, convert that to point
-            # at the multipath device
-            path = '/dev/mapper/' + multipath.get_mpath_id_from_device(path)
-        path = disk_by_path(path)
-        if path is not None:
-            cands.append(set([path]))
+        dev = disk_by_path(path)
+        if dev is not None:
+            add_cands(dev)
         else:
             cands.append(set())
 

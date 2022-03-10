@@ -23,6 +23,7 @@ class TestGetPathToStorageVolume(CiTestCase):
         self.add_patch(basepath + 'devsync', 'm_devsync')
         self.add_patch(basepath + 'util.subp', 'm_subp')
         self.add_patch(basepath + 'multipath.is_mpath_member', 'm_mp')
+        self.m_mp.return_value = False
         self.add_patch(
             basepath + 'multipath.get_mpath_id_from_device', 'm_get_mpath_id')
         self.add_patch(
@@ -120,6 +121,23 @@ class TestGetPathToStorageVolume(CiTestCase):
             ]
         disk_id = self.random_string()
         cfg = {'id': disk_id, 'type': 'disk', 'serial': serial}
+        s_cfg = OrderedDict({disk_id: cfg})
+        s_cfg.version = 2
+        self.assertEqual(
+            devname,
+            block_meta.get_path_to_storage_volume(disk_id, s_cfg))
+
+    def test_v2_match_serial_short(self):
+        serial = self.random_string()
+        serial_short = self.random_string()
+        devname = self.random_string()
+        self.m_udev_all.return_value = [{
+                'DEVNAME': devname,
+                'ID_SERIAL': serial,
+                'ID_SERIAL_SHORT': serial_short,
+            }]
+        disk_id = self.random_string()
+        cfg = {'id': disk_id, 'type': 'disk', 'serial': serial_short}
         s_cfg = OrderedDict({disk_id: cfg})
         s_cfg.version = 2
         self.assertEqual(
@@ -302,6 +320,24 @@ class TestGetPathToStorageVolume(CiTestCase):
             ]
         disk_id = self.random_string()
         cfg = {'id': disk_id, 'type': 'disk', 'path': devname1}
+        s_cfg = OrderedDict({disk_id: cfg})
+        s_cfg.version = 2
+        self.assertEqual(
+            devname2,
+            block_meta.get_path_to_storage_volume(disk_id, s_cfg))
+
+    def test_v2_match_serial_prefers_multipath(self):
+        self.m_mp.return_value = True
+        self.m_get_mpath_id.return_value = 'mpatha'
+        devname1 = self.random_string()
+        devname2 = self.random_string()
+        serial = self.random_string()
+        self.m_udev_all.return_value = [
+            {'DEVNAME': devname1, 'DEVLINKS': '', 'ID_SERIAL': serial},
+            {'DEVNAME': devname2, 'DEVLINKS': '/dev/mapper/mpatha'},
+            ]
+        disk_id = self.random_string()
+        cfg = {'id': disk_id, 'type': 'disk', 'serial': serial}
         s_cfg = OrderedDict({disk_id: cfg})
         s_cfg.version = 2
         self.assertEqual(
